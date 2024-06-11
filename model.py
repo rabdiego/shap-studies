@@ -132,14 +132,24 @@ def train(
 
 
         trainer = predictor._learner.load_trainer()
-        model_autogluon = trainer.load_model(model_name=trainer._get_best())
+        autogluon_model_name = trainer._get_best()
+        
+        model_autogluon = trainer.load_model(model_name=autogluon_model_name)
         raw_model = model_autogluon.model
+
+        train_data_no_labels = train_data.drop(train_data.columns[-1], axis=1)
         
-        column_names = list(train_data.columns)
-        autogluon_shap_wrapper = lambda ndarray : predictor.predict(convert_ndarray_to_pd_dataframe(ndarray, column_names))
+        if autogluon_model_name in ['RandomForest', 'ExtraTrees', 'LightGBM', 'CatBoost', 'XGBoost']:
+            explainer = shap.TreeExplainer(raw_model, train_data_no_labels[:100])
+        elif autogluon_model_name in ['LinearModel']:
+            explainer = shap.LinearExplainer(raw_model, train_data_no_labels[:100])
+        elif autogluon_model_name in ['NeuralNetTorch']:
+            # TODO
+            explainer = shap.DeepExplainer(raw_model, train_data_no_labels[:100])
+        else:
+            explainer = shap.KernelExplainer(raw_model.predict, train_data_no_labels[:100])    
         
-        explainer = shap.TreeExplainer(raw_model, train_data[:100])
-        shap_values = explainer(train_data)  # TODO: Computing shap_values is pretty slow, taking only the first 10 elements to debug easier
+        shap_values = explainer(train_data_no_labels) 
         
         # predictions = predictor.predict(test_data)
         # signature = infer_signature(test_data.drop(columns=[target_column], axis=1), predictions)
