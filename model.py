@@ -138,29 +138,37 @@ def train(
         raw_model = model_autogluon.model
 
         train_data_no_labels = train_data.drop(train_data.columns[-1], axis=1)
-        
+
+        subset_size = 100
         if autogluon_model_name in ['RandomForest', 'ExtraTrees', 'LightGBM', 'CatBoost', 'XGBoost']:
-            explainer = shap.TreeExplainer(raw_model, train_data_no_labels[:100])
+            explainer = shap.TreeExplainer(raw_model, train_data_no_labels[:subset_size])
         elif autogluon_model_name in ['LinearModel']:
-            explainer = shap.LinearExplainer(raw_model, train_data_no_labels[:100])
+            explainer = shap.LinearExplainer(raw_model, train_data_no_labels[:subset_size])
         elif autogluon_model_name in ['NeuralNetTorch']:
             # TODO
-            explainer = shap.DeepExplainer(raw_model, train_data_no_labels[:100])
+            explainer = shap.DeepExplainer(raw_model, train_data_no_labels[:subset_size])
         else:
-            explainer = shap.KernelExplainer(raw_model.predict, train_data_no_labels[:100])    
+            explainer = shap.KernelExplainer(raw_model.predict, train_data_no_labels[:subset_size])    
         
-        shap_values = explainer(train_data_no_labels) 
+        shap_values = explainer(train_data_no_labels, check_additivity=False) 
         
         # predictions = predictor.predict(test_data)
         # signature = infer_signature(test_data.drop(columns=[target_column], axis=1), predictions)
         metrics = predictor.evaluate(test_data, silent=True)
         mlflow.log_metrics(metrics)
 
-        shap.plots.beeswarm(shap_values, show=False)
-        beeswarm = plot_to_numpy()
-        plt.clf()
-        shap.plots.waterfall(shap_values[0], show=False)
-        waterfall = plot_to_numpy()
+        if problem_type in ['binary', 'regression']:
+            shap.plots.beeswarm(shap_values, show=False)
+            beeswarm = plot_to_numpy()
+            plt.clf()
+            shap.plots.waterfall(shap_values[0], show=False)
+            waterfall = plot_to_numpy()
+        else:
+            shap.plots.beeswarm(shap_values[:, :, 0], show=False)
+            beeswarm = plot_to_numpy()
+            plt.clf()
+            shap.plots.waterfall(shap_values[0, :, 0], show=False)
+            waterfall = plot_to_numpy()
 
         mlflow.log_image(beeswarm, 'beeswarm.png')
         mlflow.log_image(waterfall, 'waterfall.png')
