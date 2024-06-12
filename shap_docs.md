@@ -9,6 +9,7 @@ A quick guide on how to use tools from the SHAP library for explainabilty in mac
 3. SHAP and the Explainer class
 4. Different types of explainers
 5. Working with Autogluon
+6. Working with multiclass tasks
 
 
 ## 1. Shapley Values - The basics
@@ -119,3 +120,15 @@ Where the `predictor` variable is an autogluon predictor. After choosing the bes
 `raw_model = model_autogluon.model`
 
 And then you can pass the `raw_model` variable into your explainer of choice.
+
+## 6. Working with multiclass tasks
+
+For multiclass problems, the `shap_values`/`exp` object is treated as a list of different `shap_values`/`exp` objects, one for each class. The way these objects work is by treating the problem as a "one vs all" task for each class.
+
+To access them as separeted objects for each class, you should do like this: `shap_values[{instance}, :, {class}]`. So, if you want to plot a beeswarm plot for the second class, you could do:
+
+`shap.plots.beeswarm(shap_values[:, :, 1])`
+
+And if you want to plot a waterfall plot for the 10th instance of the fourth class, you could do:
+
+`shap.plots.beeswarm(shap_values[9, :, 3])`
