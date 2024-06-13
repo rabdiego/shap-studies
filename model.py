@@ -17,6 +17,9 @@ from mlflow.models import infer_signature
 from PIL import Image
 import shap
 import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
        
 class AutogluonModel(mlflow.pyfunc.PythonModel):
@@ -130,7 +133,6 @@ def train(
             )
         )
 
-
         trainer = predictor._learner.load_trainer()
         autogluon_model_name = trainer._get_best()
         
@@ -145,12 +147,31 @@ def train(
         elif autogluon_model_name in ['LinearModel']:
             explainer = shap.LinearExplainer(raw_model, train_data_no_labels[:subset_size])
         elif autogluon_model_name in ['NeuralNetTorch']:
-            # TODO
-            explainer = shap.DeepExplainer(raw_model, train_data_no_labels[:subset_size])
+            torch_train_data = torch.from_numpy(train_data_no_labels.values).float()
+            feature_names = list(train_data_no_labels.columns)
+            
+            with torch.no_grad():
+                torch_outputs = raw_model(torch_train_data)
+                if problem_type == 'multiclass':
+                    probas = F.softmax(torch_outputs)
+                    base_values = torch.mean(probas, 0).numpy()
+                elif problem_type == 'binary':
+                    probas = F.softmax(torch_outputs)[:, 1]
+                    base_values = torch.mean(probas).item()
+                else:
+                    base_values = torch.mean(torch_outputs).item()
+            
+            explainer = shap.DeepExplainer(raw_model, torch_train_data[:subset_size])
+            
+            shap_values = explainer.shap_values(torch_train_data)
+            
+            exp = shap.Explanation(shap_values, data=torch_train_data.numpy(), base_values=base_values, feature_names=feature_names)
         else:
             explainer = shap.KernelExplainer(raw_model.predict, train_data_no_labels[:subset_size])    
         
-        shap_values = explainer(train_data_no_labels, check_additivity=False) 
+        if autogluon_model_name != 'NeuralNetTorch':
+            exp = explainer(train_data_no_labels, check_additivity=False)
+        num_classes = shap_values.shape[2]
         
         # predictions = predictor.predict(test_data)
         # signature = infer_signature(test_data.drop(columns=[target_column], axis=1), predictions)
@@ -158,20 +179,27 @@ def train(
         mlflow.log_metrics(metrics)
 
         if problem_type in ['binary', 'regression']:
-            shap.plots.beeswarm(shap_values, show=False)
+            shap.plots.beeswarm(exp, show=False)
             beeswarm = plot_to_numpy()
+            mlflow.log_image(beeswarm, 'beeswarm.png')
+            
             plt.clf()
-            shap.plots.waterfall(shap_values[0], show=False)
+            
+            shap.plots.waterfall(exp[0], show=False)
             waterfall = plot_to_numpy()
+            mlflow.log_image(waterfall, 'waterfall.png')
+            
         else:
-            shap.plots.beeswarm(shap_values[:, :, 0], show=False)
-            beeswarm = plot_to_numpy()
-            plt.clf()
-            shap.plots.waterfall(shap_values[0, :, 0], show=False)
-            waterfall = plot_to_numpy()
-
-        mlflow.log_image(beeswarm, 'beeswarm.png')
-        mlflow.log_image(waterfall, 'waterfall.png')
+            for classe in range(num_classes):
+                shap.plots.beeswarm(exp[:, :, classe], show=False)
+                beeswarm = plot_to_numpy()
+                mlflow.log_image(beeswarm, f'shap_plots/beeswarm/beeswarm_{classe}.png')
+                plt.clf()
+                
+                shap.plots.waterfall(exp[0, :, classe], show=False)
+                waterfall = plot_to_numpy()
+                mlflow.log_image(waterfall, f'shap_plots/waterfall/waterfall_{classe}.png')
+                plt.clf()
         
         artifacts = {"predictor_path": predictor.path}
         mlflow.pyfunc.log_model(
